@@ -19,6 +19,58 @@ use handlers::signature::handle_signature;
 
 extern crate pnet;
 
+fn main() {
+    const GROUP_NUMBER: u8 = 32;
+    const GROUP_SECRET: u32 = 0xfe8d9ecf;
+    const IP_ADDR: [u8; 4] = [164, 92, 223, 132];
+
+    // // START OF SCANNER
+    let args: Vec<String> = std::env::args().collect();
+    let (ip_address, low_port, high_port) = match udp_scanner::parse_arguments(args) {
+        Some(args) => args,
+        None => return,
+    };
+
+    println!("Scanning {} from {} to {}", ip_address, low_port, high_port);
+
+    let open_ports = udp_scanner::find_open_ports(&ip_address, low_port, high_port);
+    println!("Open ports: {:?}", open_ports);
+
+    // // END OF SCANNER
+    // let open_ports = vec![4001, 4010, 4021, 4052]; // Replace with scanner for dynamic ports. This is just for faster testing.
+
+    // START OF ASSOCIATING PORTS WITH HANDLERS
+
+    // At this stage we have a list of open ports
+    // Now we have to find out which port is associated with which handler
+
+    let ip_addr = IpAddr::from(IP_ADDR);
+    // First we get the responses from each port
+    let port_reponses = get_port_responses(ip_addr, open_ports.as_slice());
+    // Then we associate the ports with the correct handler, based on the response
+    let port_and_associated_handler = associate_ports_with_handlers(port_reponses);
+    // END OF ASSOCIATING PORTS WITH HANDLERS
+
+    // START OF EXECUTING HANDLERS
+
+    // I put the handlers in a struct so that they can share state
+    // This also allows me to abstract away the logic of executing the handlers
+    let mut port_puzzle_solver = PortPuzzleSolver {
+        signature: vec![0; 4],
+        secret_phrase: String::new(),
+        secret_ports: Vec::new(),
+        ip_addr: IP_ADDR,
+        group_number: GROUP_NUMBER,
+        group_secret: GROUP_SECRET,
+        port_and_associated_handler,
+    };
+
+    // Call the handlers in the correct order
+    port_puzzle_solver.solve();
+
+    // END OF EXECUTING HANDLERS
+}
+
 #[derive(PartialEq)]
 enum HandlerType {
     DarkSide,
@@ -27,7 +79,10 @@ enum HandlerType {
     Signature,
 }
 
-struct SharedState {
+/// Struct to share state between handlers
+/// And to define how to mutate the state
+/// This is used to abstract away the logic of executing the handlers
+struct PortPuzzleSolver {
     signature: Vec<u8>,
     secret_phrase: String,
     secret_ports: Vec<u16>,
@@ -37,20 +92,12 @@ struct SharedState {
     port_and_associated_handler: Vec<(u16, HandlerType)>,
 }
 
-impl SharedState {
-    fn execute_secret(&mut self) {
+impl PortPuzzleSolver {
+    // Template method to execute all the handlers in the correct order
+    fn solve(&mut self) {
         self.execute_handler(HandlerType::Secret);
-    }
-
-    fn execute_dark_side(&mut self) {
         self.execute_handler(HandlerType::DarkSide);
-    }
-
-    fn execute_signature(&mut self) {
         self.execute_handler(HandlerType::Signature);
-    }
-
-    fn execute_expstn(&mut self) {
         self.execute_handler(HandlerType::Expstn);
     }
 
@@ -88,57 +135,6 @@ impl SharedState {
             }
         }
     }
-}
-
-fn main() {
-    const GROUP_NUMBER: u8 = 32;
-    const GROUP_SECRET: u32 = 0xfe8d9ecf;
-    const IP_ADDR: [u8; 4] = [164, 92, 223, 132];
-
-    // // START OF SCANNER
-    let args: Vec<String> = std::env::args().collect();
-    let (ip_address, low_port, high_port) = match udp_scanner::parse_arguments(args) {
-        Some(args) => args,
-        None => return,
-    };
-
-    println!("Scanning {} from {} to {}", ip_address, low_port, high_port);
-
-    let open_ports = udp_scanner::find_open_ports(&ip_address, low_port, high_port);
-    println!("Open ports: {:?}", open_ports);
-
-    // // END OF SCANNER
-    // let open_ports = vec![4001, 4010, 4021, 4052]; // Replace with scanner for dynamic ports. This is just for faster testing.
-
-    // START OF ASSOCIATING PORTS WITH HANDLERS
-
-    // At this stage we have a list of open ports
-    // Now we have to find out which port is associated with which handler
-
-    let ip_addr = IpAddr::from(IP_ADDR);
-    // First we get the responses from each port
-    let port_reponses = get_port_responses(ip_addr, open_ports.as_slice());
-    // Then we associate the ports with the correct handler, based on the response
-    let port_and_associated_handler = associate_ports_with_handlers(port_reponses);
-    // END OF ASSOCIATING PORTS WITH HANDLERS
-
-    // START OF EXECUTING HANDLERS
-    let mut shared_state = SharedState {
-        signature: vec![0; 4],
-        secret_phrase: String::new(),
-        secret_ports: Vec::new(),
-        ip_addr: IP_ADDR,
-        group_number: GROUP_NUMBER,
-        group_secret: GROUP_SECRET,
-        port_and_associated_handler,
-    };
-
-    shared_state.execute_secret();
-    shared_state.execute_dark_side();
-    shared_state.execute_signature();
-    shared_state.execute_expstn();
-
-    // END OF EXECUTING HANDLERS
 }
 
 // Iterate over all the ports and their responses and associate them with the correct handler
