@@ -1,76 +1,90 @@
-// pub struct DarkSideHandler {
-//     pub port: u16,
-// }
-// const IPV4_HEADER_LEN: usize = 20;
-// const UDP_HEADER_LEN: usize = 8;
+use crate::port_handler_utils::open_socket;
+use crate::port_handler_utils::send_and_receive_l3;
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::MutableIpv4Packet;
+use pnet::packet::udp::MutableUdpPacket;
+use pnet::packet::MutablePacket;
+use pnet::transport;
+use pnet::transport::TransportChannelType::Layer3;
+use pnet::util::checksum;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 
-// impl DarkSideHandler {
-//     pub fn send_evil_packet(
-//         &self,
-//         src_ip: Ipv4Addr,
-//         dest_ip: Ipv4Addr,
-//         dest_port: u16,
-//         payload: &[u8],
-//     ) -> Result<(), std::io::Error> {
-//         // Calculate the total packet size
-//         let packet_size = IPV4_HEADER_LEN + UDP_HEADER_LEN + payload.len();
-//         let mut packet = vec![0u8; packet_size];
+pub fn handle_dark_side(socket_addr: SocketAddr, signature: &[u8; 4]) -> u16 {
+    println!("Handling Dark Side...");
+    // Create a new UDP socket to listen for the response and to provide a known source port
+    // The source port will be manually set in the UDP packet
+    let socket = open_socket().unwrap();
 
-//         // Create a mutable IPv4 packet
-//         let mut ipv4_packet = MutableIpv4Packet::new(&mut packet[..IPV4_HEADER_LEN]).unwrap();
+    // Create a new raw IPv4 transport channel
+    let (mut tx, _) = transport::transport_channel(4096, Layer3(IpNextHeaderProtocols::Udp))
+        .expect("Failed to create transport channel");
 
-//         // Set the IPv4 fields
-//         ipv4_packet.set_version(4);
-//         ipv4_packet.set_header_length(IPV4_HEADER_LEN as u8 / 4); // Header length is in words
-//         ipv4_packet.set_total_length(packet_size as u16);
-//         ipv4_packet.set_next_level_protocol(pnet::packet::ip::IpNextHeaderProtocols::Udp);
-//         ipv4_packet.set_source(src_ip);
-//         ipv4_packet.set_destination(dest_ip);
+    // UDP packet
 
-//         // Set the "evil bit"
-//         let mut flags = ipv4_packet.get_flags();
-//         flags |= 0b100;
-//         ipv4_packet.set_flags(flags);
+    let source_port = socket.local_addr().unwrap().port(); // Random source port given by OS/Socket
+    let dest_port = socket_addr.port(); // Dark Side port
+                                        // Print the source port and destination port
+    println!("Source Port: {}", source_port);
+    println!("Destination Port: {}", dest_port);
 
-//         // Create a mutable UDP packet
-//         let mut udp_packet = MutableUdpPacket::new(&mut packet[IPV4_HEADER_LEN..]).unwrap();
+    let mut udp_buffer = [0u8; 12]; // 8-byte header + 4-byte payload
+    let mut udp_packet =
+        MutableUdpPacket::new(&mut udp_buffer).expect("Failed to create UDP packet");
+    udp_packet.set_source(source_port);
+    udp_packet.set_destination(dest_port);
+    // Signature is the payload (4 bytes)
+    udp_packet.set_payload(signature);
+    udp_packet.set_length(12); // 8-byte header + 1-byte payload
+    let csum = checksum(udp_packet.packet_mut(), 1);
+    udp_packet.set_checksum(csum);
 
-//         // Set the UDP fields
-//         udp_packet.set_source(0); // Use a random source port or a specific one if needed
-//         udp_packet.set_destination(dest_port);
-//         udp_packet.set_length((UDP_HEADER_LEN + payload.len()) as u16);
-//         udp_packet.set_payload(payload);
+    // IPV4 packet
+    let source_ip = Ipv4Addr::from([130, 208, 29, 23]); // TODO: Dynamically get source IP
+    let dest_ip = Ipv4Addr::from([164, 92, 223, 132]); // Replace with your destination IP
 
-//         // Open a transport channel to send the packet
-//         let (mut tx, _) = transport_channel(
-//             packet_size,
-//             TransportChannelType::Layer3(IpNextHeaderProtocols::Udp),
-//         )?;
-//         let dest = SocketAddrV4::new(dest_ip, dest_port);
-//         let ip_addr: IpAddr = dest.ip().clone().into();
-//         tx.send_to(&ipv4_packet, ip_addr)?;
+    let mut ipv4_buffer = [0u8; 32]; // 20-byte header + 12-byte UDP packet
+    let mut ipv4_packet =
+        MutableIpv4Packet::new(&mut ipv4_buffer).expect("Failed to create IPv4 packet");
+    ipv4_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+    ipv4_packet.set_version(4); // IPv4
+    ipv4_packet.set_ttl(64); // Default value
+    ipv4_packet.set_header_length(5); // 5 * 4 bytes = 20 bytes
+    ipv4_packet.set_flags(0b100); // With Evil-Bit set
+    ipv4_packet.set_source(source_ip);
+    ipv4_packet.set_destination(dest_ip);
 
-//         Ok(())
-//     }
+    ipv4_packet.set_total_length(20 + 12); // 20-byte header + 9-byte UDP packet
+    ipv4_packet.set_payload(udp_packet.packet_mut());
+    let checksum = checksum(ipv4_packet.packet_mut(), 1);
+    ipv4_packet.set_checksum(checksum);
 
-//     pub fn handle_response(&self, dest_port: u16) -> Vec<u8> {
-//         // Handle the dark side response
-//         println!("Handling dark side response: {}", self.port);
+    let dest_ip_addr: IpAddr = dest_ip.into();
 
-//         // Send the evil packet 130.208.29.23
-//         let source_ip = Ipv4Addr::new(130, 208, 29, 23);
-//         let dest_ip = Ipv4Addr::new(IP_ADDR[0], IP_ADDR[1], IP_ADDR[2], IP_ADDR[3]);
-//         let payload = b"Hello, world!";
-//         self.send_evil_packet(source_ip, dest_ip, dest_port, payload)
-//             .expect("Failed to send evil packet");
+    // Send the packet using L3 channel, receive the response using UDP socket
+    let raw_buf = send_and_receive_l3(&mut tx, ipv4_packet, &socket, dest_ip_addr, 5)
+        .expect("To receive packet from Dark Side");
 
-//         let response = Vec::new();
-//         response
-//     }
-// }
+    // Extract and return port in response message
+    // Example: Yes, strong in the dark side you are group 32 . Here is my secret port: 4070
+    let response = String::from_utf8_lossy(
+        &raw_buf[..raw_buf
+            .iter()
+            .position(|&x| x == 0)
+            .unwrap_or(raw_buf.len())],
+    )
+    .to_string();
 
-// impl PortResponseHandler for DarkSideHandler {
-//     fn get_port(&self) -> u16 {
-//         self.port
-//     }
-// }
+    // Extract port number from string
+    let port = response
+        .split_whitespace()
+        .last()
+        .unwrap()
+        .trim_matches(|c: char| !c.is_numeric())
+        .parse::<u16>()
+        .unwrap();
+    println!("Dark Side Step 1: {}", response);
+    println!("Dark Side Step 2: Secret port is {}", port);
+    port
+}

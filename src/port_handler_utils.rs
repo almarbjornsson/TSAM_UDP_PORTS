@@ -1,9 +1,7 @@
-use std::io;
-use std::net::{IpAddr, SocketAddr, UdpSocket};
-
-use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
 use pnet::transport::TransportSender;
+use std::io;
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 
 pub fn get_port_responses(ip_addr: IpAddr, open_ports: &[u16]) -> Vec<(u16, String)> {
     let mut port_responses: Vec<(u16, String)> = Vec::new();
