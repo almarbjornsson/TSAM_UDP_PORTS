@@ -41,9 +41,12 @@ pub fn handle_dark_side(socket_addr: SocketAddr, signature: &[u8; 4]) -> u16 {
     udp_packet.set_checksum(csum);
 
     // IPV4 packet
-    let source_ip = Ipv4Addr::from([130, 208, 29, 23]); // TODO: Dynamically get source IP
-    let dest_ip = Ipv4Addr::from([164, 92, 223, 132]); // Replace with your destination IP
-
+    let source_ip = Ipv4Addr::from([0, 0, 0, 0]); // Set to all zeroes to let OS choose
+    let dest_ip_addr: IpAddr = socket_addr.ip(); // Dark Side IP
+    let dest_ip = match dest_ip_addr {
+        IpAddr::V4(ipv4) => ipv4,
+        _ => panic!("Only IPv4 is supported"),
+    };
     let mut ipv4_buffer = [0u8; 32]; // 20-byte header + 12-byte UDP packet
     let mut ipv4_packet =
         MutableIpv4Packet::new(&mut ipv4_buffer).expect("Failed to create IPv4 packet");
